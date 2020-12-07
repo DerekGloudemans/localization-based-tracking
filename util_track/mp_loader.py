@@ -32,14 +32,18 @@ try:
     from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
     
 except:
-    cwd = os.getcwd()
-    gp_cwd = cwd.split("/")[:-1]
-    gp_cwd.append("I24-video-ingest")
-    ts_path = os.path.join("/",*gp_cwd)
-    if ts_path not in sys.path:
-        sys.path.insert(0,ts_path)
-    
-    from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
+    try:
+        cwd = os.getcwd()
+        gp_cwd = cwd.split("/")[:-1]
+        gp_cwd.append("I24-video-ingest")
+        ts_path = os.path.join("/",*gp_cwd)
+        if ts_path not in sys.path:
+            sys.path.insert(0,ts_path)
+        from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
+    except:
+        sys.path.insert(0,os.path.join(os.getcwd(),"I24-video-ingest"))
+        from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
+        
 class FrameLoader():
     
     def __init__(self,track_directory,device, buffer_size = 9,timestamp_geom_path = None,timestamp_checksum_path = None):

@@ -51,7 +51,7 @@ class Localization_Tracker():
                  skip_step = 1,
                  checksum_path = None,
                  geom_path = None,
-                 output_dir):
+                 output_dir= None):
         """
          Parameters
         ----------
@@ -791,12 +791,13 @@ class Localization_Tracker():
             frame_stuff = next(self.loader)            
             if len(frame_stuff) == 5:
                 (frame_num,frame,dim,original_im,timestamp) = frame_stuff
-                self.all_timestamps.append(timestamp[0])
+                if timestamp is not None:
+                    self.all_timestamps.append(timestamp[0])
             else:
                 (frame_num,frame,dim,original_im) = frame_stuff
-                self.all_timestamps.append(-1)
+                if timestamp is not None:
+                    self.all_timestamps.append(-1)
 
-            print(frame_num)
             
             torch.cuda.synchronize()
             self.time_metrics["load"] = time.time() - start
@@ -851,7 +852,7 @@ class Localization_Tracker():
         
         return final_output, framerate, self.time_metrics
     
-    def get_results_csv(self):
+    def write_results_csv(self):
         """
         Call after tracking to summarize results in .csv file
         """
