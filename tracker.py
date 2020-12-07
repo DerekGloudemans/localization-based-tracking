@@ -50,7 +50,8 @@ class Localization_Tracker():
                  wer = 1.25,
                  skip_step = 1,
                  checksum_path = None,
-                 geom_path = None):
+                 geom_path = None,
+                 output_dir):
         """
          Parameters
         ----------
@@ -79,6 +80,7 @@ class Localization_Tracker():
         """
         
         self.input_file_name = track_dir # either folder of frames or video
+        self.output_dir = output_dir
         
         #store parameters
         self.d = det_step
@@ -854,7 +856,9 @@ class Localization_Tracker():
         Call after tracking to summarize results in .csv file
         """
         outfile = self.input_file_name.split(".")[0] + "_track_outputs.csv"
-        
+        if self.output_dir is not None:
+            outfile = os.path.join(self.output_dir,outfile.split("/")[-1])
+
         
         # create headers
         summary_header = [
