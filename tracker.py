@@ -932,7 +932,7 @@ class Localization_Tracker():
                         obj_line.append(frame)
                         obj_line.append(timestamp)
                         obj_line.append(id)
-                        obj_line.append(self.class_dict[np.argmax(self.all_classes[id])])
+                        obj_line.append("Dummy Val")#obj_line.append(self.class_dict[np.argmax(self.all_classes[id])])
                         obj_line.append(bbox[0])
                         obj_line.append(bbox[2])
                         obj_line.append(bbox[1])
