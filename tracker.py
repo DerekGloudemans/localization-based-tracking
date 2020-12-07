@@ -20,7 +20,7 @@ from torchvision.ops import roi_align
 import matplotlib.pyplot  as plt
 from scipy.optimize import linear_sum_assignment
 import _pickle as pickle
-
+import csv
 
 
 # filter and frame loader
@@ -48,7 +48,9 @@ class Localization_Tracker():
                  PLOT = True,
                  OUT = None,
                  wer = 1.25,
-                 skip_step = 1):
+                 skip_step = 1,
+                 checksum_path = None,
+                 geom_path = None):
         """
          Parameters
         ----------
@@ -75,6 +77,8 @@ class Localization_Tracker():
         PLOT : bool, optional
             If True, resulting frames are output. The default is True. 
         """
+        
+        self.input_file_name = track_dir # either folder of frames or video
         
         #store parameters
         self.d = det_step
@@ -107,7 +111,7 @@ class Localization_Tracker():
         # store filter params
         self.filter = Torch_KF(torch.device("cpu"),INIT = kf_params)
        
-        self.loader = FrameLoader(track_dir,self.device,det_step,init_frames)
+        self.loader = FrameLoader(track_dir,self.device,buffer_size = 9,timestamp_checksum_path = checksum_path,timestamp_geom_path = geom_path)
         #self.track_id = int(track_dir.split("MVI_")[-1])
         
         # create output image writer
@@ -117,14 +121,15 @@ class Localization_Tracker():
             self.writer = None
         
         time.sleep(5)
-        self.n_frames = len(self.loader)
+        self.n_frames = 10000 # expected number of frames, can be changed
+        self.frames_processed = 0
     
         self.next_obj_id = 0             # next id for a new object (incremented during tracking)
         self.fsld = {}                   # fsld[id] stores frames since last detected for object id
     
         self.all_tracks = {}             # stores states for each object
         self.all_classes = {}            # stores class evidence for each object
-    
+        self.all_timestamps = []         # store timestamp at each frame
     
         self.class_dict = class_dict
     
@@ -613,9 +618,17 @@ class Localization_Tracker():
         time_metrics : dict
             Time utilization for each operation in tracking
         """    
+        self.start_time = time.time()
         
-        frame_num, (frame,dim,original_im) = next(self.loader)            
-
+        
+        frame_stuff = next(self.loader)            
+        if len(frame_stuff) == 5:
+            (frame_num,frame,dim,original_im,timestamp) = frame_stuff
+            self.all_timestamps.append(timestamp[0])
+        else:
+            (frame_num,frame,dim,original_im) = frame_stuff
+            self.all_timestamps.append(-1)
+            
         while frame_num != -1:            
             
             #if frame_num % self.d < self.init_frames:
@@ -770,14 +783,27 @@ class Localization_Tracker():
             self.time_metrics['plot'] += time.time() - start
        
             # load next frame  
+            self.frames_processed += 1
             start = time.time()
-            frame_num ,(frame,dim,original_im) = next(self.loader) 
+            
+            frame_stuff = next(self.loader)            
+            if len(frame_stuff) == 5:
+                (frame_num,frame,dim,original_im,timestamp) = frame_stuff
+                self.all_timestamps.append(timestamp[0])
+            else:
+                (frame_num,frame,dim,original_im) = frame_stuff
+                self.all_timestamps.append(-1)
+
+            print(frame_num)
+            
             torch.cuda.synchronize()
             self.time_metrics["load"] = time.time() - start
             torch.cuda.empty_cache()
             
         
         # clean up at the end
+        self.end_time = time.time()
+        
         cv2.destroyAllWindows()
         
     def get_results(self):
@@ -797,7 +823,8 @@ class Localization_Tracker():
             total_time = 0
             for key in self.time_metrics:
                 total_time += self.time_metrics[key]
-            framerate = self.n_frames / total_time
+            #framerate = self.frames_processed / total_time
+            framerate = self.frames_processed / (self.end_time - self.start_time())
 
         # get tracklet results 
         final_output = []
@@ -821,3 +848,93 @@ class Localization_Tracker():
             final_output.append(frame_objs)
         
         return final_output, framerate, self.time_metrics
+    
+    def get_results_csv(self):
+        """
+        Call after tracking to summarize results in .csv file
+        """
+        outfile = self.input_file_name.split(".")[0] + "_track_outputs.csv"
+        
+        
+        # create headers
+        summary_header = [
+            "Video sequence name",
+            "Processing start time",
+            "Processing end time",
+            "Timestamp start time",
+            "Timestamp end time",
+            "Frames processed",
+            "Unique objects",
+            "GPU"
+            ]
+        
+        # create header data
+        summary = []
+        summary.append(self.input_file_name)
+        start_time_ms = str(np.round(self.start_time%1,2)).split(".")[1]
+        start_time = time.strftime('%Y-%m-%d %H:%M:%S.{}', time.localtime(self.start_time)).format(start_time_ms)
+        summary.append(start_time)
+        end_time_ms = str(np.round(self.end_time%1,2)).split(".")[1]
+        end_time = time.strftime('%Y-%m-%d %H:%M:%S.{}', time.localtime(self.end_time)).format(end_time_ms)
+        summary.append(end_time)    
+        summary.append(self.all_timestamps[0])
+        summary.append(self.all_timestamps[-1])
+        summary.append(self.frames_processed)
+        summary.append(self.next_obj_id) # gives correct count since 0-indexed
+        summary.append(str(self.device))
+        
+        fps = self.frames_processed / (self.end_time - self.start_time)
+        time_header = ["Processing fps"]
+        time_data = [fps]
+        for item in self.time_metrics.keys():
+            time_header.append(item)
+            time_data.append(self.time_metrics[item])
+        
+        data_header = [
+            "Frame #",
+            "Timestamp",
+            "Object ID",
+            "Object Class",
+            "BBox xmin",
+            "BBox ymin",
+            "BBox xmax",
+            "BBox ymax"
+            ]
+        
+        with open(outfile, mode='w') as f:
+            out = csv.writer(f, delimiter=',')
+            
+            # write first chunk
+            out.writerow(summary_header)
+            out.writerow(summary)
+            out.writerow([])
+            
+            # write second chunk
+            out.writerow(time_header)
+            out.writerow(time_data)
+            out.writerow([])
+            
+            # write main chunk
+            out.writerow(data_header)
+            
+            for frame in range(self.frames_processed):
+                timestamp = self.all_timestamps[frame]
+                
+                for id in self.all_tracks:
+                    bbox = self.all_tracks[id][frame]
+                    if bbox[0] != 0:
+                        obj_line = []
+                        obj_line.append(frame)
+                        obj_line.append(timestamp)
+                        obj_line.append(id)
+                        obj_line.append(self.class_dict[np.argmax(self.all_classes[id])])
+                        obj_line.append(bbox[0])
+                        obj_line.append(bbox[2])
+                        obj_line.append(bbox[1])
+                        obj_line.append(bbox[3])
+                        
+                        out.writerow(obj_line)
+            
+            
+            
+        

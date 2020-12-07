@@ -7,7 +7,7 @@ Created on Tue May 12 11:33:03 2020
 """
 
 
-import os
+import os,sys
 import numpy as np
 import random 
 import time
@@ -20,10 +20,29 @@ import torch
 from torchvision.transforms import functional as F
 import torch.multiprocessing as mp
 
-
+# import timestamp parsing
+try:
+    cwd = os.getcwd()
+    gp_cwd = cwd.split("/")[:-2]
+    gp_cwd.append("I24-video-ingest")
+    ts_path = os.path.join("/",*gp_cwd)
+    if ts_path not in sys.path:
+        sys.path.insert(0,ts_path)
+    
+    from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
+    
+except:
+    cwd = os.getcwd()
+    gp_cwd = cwd.split("/")[:-1]
+    gp_cwd.append("I24-video-ingest")
+    ts_path = os.path.join("/",*gp_cwd)
+    if ts_path not in sys.path:
+        sys.path.insert(0,ts_path)
+    
+    from utilities import get_precomputed_checksums,get_timestamp_geometry,parse_frame_timestamp
 class FrameLoader():
     
-    def __init__(self,track_directory,device, det_step, init_frames, buffer_size = 9):
+    def __init__(self,track_directory,device, buffer_size = 9,timestamp_geom_path = None,timestamp_checksum_path = None):
         
         """
         Parameters
@@ -49,10 +68,8 @@ class FrameLoader():
             self.files = files
             
             manager = mp.Manager()
-            self.det_step = manager.Value("i",det_step)
             
             #self.det_step = det_step
-            self.init_frames = init_frames
             self.device = device
         
             # create shared queue
@@ -62,7 +79,7 @@ class FrameLoader():
             
             self.frame_idx = -1
             
-            self.worker = ctx.Process(target=load_to_queue, args=(self.queue,files,self.det_step,init_frames,device,buffer_size,))
+            self.worker = ctx.Process(target=load_to_queue, args=(self.queue,files,device,buffer_size,))
             self.worker.start()
             time.sleep(5)
         
@@ -72,10 +89,8 @@ class FrameLoader():
             self.sequence = sequence
         
             manager = mp.Manager()
-            self.det_step = manager.Value("i",det_step)
             
             #self.det_step = det_step
-            self.init_frames = init_frames
             self.device = device
         
             # create shared queue
@@ -85,9 +100,9 @@ class FrameLoader():
             
             self.frame_idx = -1
             
-            self.len = 30*5*60
-            
-            self.worker = ctx.Process(target=load_to_queue_video, args=(self.queue,sequence,device,buffer_size,))
+            args=(self.queue,sequence,device,buffer_size,)
+            kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path}
+            self.worker = ctx.Process(target=load_to_queue_video,args = args, kwargs=kwargs)
             self.worker.start()
             time.sleep(5)
         
@@ -101,6 +116,8 @@ class FrameLoader():
             return self.len
         except:   
             return len(self.files)
+        finally:
+            return None
     
     def __next__(self):
         """
@@ -117,20 +134,18 @@ class FrameLoader():
             image, image dimensions and original image
 
         """
+        frame = self.queue.get(timeout = 10)
+        self.frame_idx = frame[0]
         
-        if self.frame_idx < len(self) -1:
-        
-            frame = self.queue.get(timeout = 10)
-            self.frame_idx = frame[0]
-            frame = frame[1:]
-            return self.frame_idx, frame
+        if self.frame_idx != -1:
+            return frame
         
         else:
             self.worker.terminate()
             self.worker.join()
-            return -1,(None,None,None)
+            return frame
 
-def load_to_queue(image_queue,files,det_step,init_frames,device,queue_size):
+def load_to_queue(image_queue,files,device,queue_size):
     """
     Description
     -----------
@@ -144,8 +159,6 @@ def load_to_queue(image_queue,files,det_step,init_frames,device,queue_size):
         shared queue in which preprocessed images are put.
     files : list of str
         each str is path to one file in track directory
-    det_step : int
-        specifies number of frames between dense detections 
     init_frames : int
         specifies number of dense detections before localization begins
     device : torch.device
@@ -192,6 +205,8 @@ def load_to_queue(image_queue,files,det_step,init_frames,device,queue_size):
              
             frame_idx += 1
     
+    image_queue.put((-1,None,None,None))
+    
     # neverending loop, because if the process ends, the tensors originally
     # initialized in this function will be deleted, causing issues. Thus, this 
     # function runs until a call to self.next() returns -1, indicating end of track 
@@ -199,12 +214,16 @@ def load_to_queue(image_queue,files,det_step,init_frames,device,queue_size):
     while True:  
            time.sleep(5)
         
-def load_to_queue_video(image_queue,sequence,device,queue_size):
+def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = None,geom_path = None):
     
     cap = cv2.VideoCapture(sequence)
     
+    if checksum_path is not None:
+        checksums = get_precomputed_checksums(checksum_path)
+        geom = get_timestamp_geometry(geom_path)
+    
     frame_idx = 0    
-    while frame_idx < 30*5*60:
+    while True:
         
         if image_queue.qsize() < queue_size:
             
@@ -213,10 +232,20 @@ def load_to_queue_video(image_queue,sequence,device,queue_size):
             # load next image from videocapture object
             ret,original_im = cap.read()
             if ret == False:
-                frame = (-1,None,None,None)
+                frame = (-1,None,None,None,None)
                 image_queue.put(frame)       
                 break
             else:
+                timestamp = None
+                if checksum_path is not None:
+                    # get timestamp
+                    timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
+                    if timestamp[0] is None:
+                        #print(original_im.shape)
+                        #cv2.imshow("frame",timestamp[1])
+                        #cv2.waitKey(0)
+                        timestamp = None
+                    
                 original_im = cv2.resize(original_im,(1920,1080))
                 im = F.to_tensor(original_im)
                 im = F.normalize(im,mean=[0.485, 0.456, 0.406],
@@ -224,7 +253,7 @@ def load_to_queue_video(image_queue,sequence,device,queue_size):
                 # store preprocessed image, dimensions and original image
                 im = im.to(device)
                 dim = None
-                frame = (frame_idx,im,dim,original_im)
+                frame = (frame_idx,im,dim,original_im,timestamp)
              
                 # append to queue
                 image_queue.put(frame)       
@@ -238,41 +267,44 @@ def load_to_queue_video(image_queue,sequence,device,queue_size):
            time.sleep(5)
     
     
-        
-if __name__ == "__main__":
+def test_frameloader(path,geom,checksum):
     
-    track_dir = "/home/worklab/Desktop/detrac/DETRAC-all-data"
-    label_dir = "/home/worklab/Desktop/detrac/DETRAC-Train-Annotations-XML-v3"
-    track_list = [os.path.join(track_dir,item) for item in os.listdir(track_dir)]  
-    label_list = [os.path.join(label_dir,item) for item in os.listdir(label_dir)] 
-    track_dict = {}
-    for item in track_list:
-        id = int(item.split("MVI_")[-1])
-        track_dict[id] = {"frames": item,
-                          "labels": None}
-    for item in label_list:
-        id = int(item.split("MVI_")[-1].split("_v3.xml")[0])
-        track_dict[id]['labels'] = item
-        
-    path = track_dict[40962]['frames']     
-    test = FrameLoader(path,torch.device("cuda:0"),det_step = 10, init_frames = 3)
-
+    test = FrameLoader(path,torch.device("cuda:3"),buffer_size = 15,timestamp_geom_path = geom,timestamp_checksum_path = checksum)
+    
+    print (test.queue.qsize())
     all_time = 0
-    print(test.queue.qsize())
     count = 0
+    
     while True:
         start = time.time()
-        num, frame = next(test)
+        (frame_idx,im,dim,original_im,timestamp) = next(test)
         
-        if num > 0:
+        if frame_idx > 0:
             all_time += (time.time() - start)
         
         time.sleep(0.03)
        
-        if frame is not None:
-            out = frame[0] + 1
-        
-        if num == -1:
+        # try modifying the frame
+        if im is not None:
+            out = im[0] + 1
+                
+        if frame_idx == -1:
             break
+        
         count += 1
-        print(count, all_time/count)
+        print("Frame {}, timestamp: {},  Loading rate:{}   Queue size:{}".format(count, timestamp, all_time/count,test.queue.qsize()))
+        
+def test_load_to_queue_video(sequence,queue_size,checksum_path = None,geom_path = None):
+        import queue
+        test_queue = queue.Queue(queue_size)
+        
+        load_to_queue_video(test_queue,sequence,torch.device("cuda:3"),queue_size,checksum_path = checksum_path, geom_path = geom_path)
+        
+        
+if __name__ == "__main__":
+    
+    path = "/home/worklab/Data/cv/video/ingest_session_00011/recording/record_p1c0_00000.mp4"
+    geom = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_geometry_4K.pkl"
+    checksum = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_pixel_checksum_6.pkl"
+    #test_load_to_queue_video(path,10,geom_path = geom,checksum_path = checksum)
+    test_frameloader(path,geom,checksum)

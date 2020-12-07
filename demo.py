@@ -42,13 +42,13 @@ if __name__ == "__main__":
     
      # parameters
      iou_cutoff = 0.75       # tracklets overlapping by this amount will be pruned
-     det_step = 3            # frames between full detection steps
+     det_step = 5            # frames between full detection steps
      skip_step = 1           # frames between update steps (either detection or localization)
      ber = 2.4               # amount by which to expand a priori tracklet to crop object
      init_frames = 1         # number of detection steps in a row to perform
      matching_cutoff = 100   # detections farther from tracklets than this will not be matched 
      SHOW = True             # show tracking in progress?
-     LOCALIZE = False        # if False, will skip frames between detection steps
+     LOCALIZE = True        # if False, will skip frames between detection steps
      OUTVID = os.path.join(os.getcwd(),"demo","example_outputs")
     
     ###########################################################################
@@ -75,6 +75,10 @@ if __name__ == "__main__":
      
      # load filter
      filter_params = os.path.join(os.getcwd(),"config","filter_params_tuned.cpkl")
+     
+     # for timestamps, remove later
+     geom = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_geometry_4K.pkl"
+     checksum = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_pixel_checksum_6.pkl"
      
      if not LOCALIZE:
          localizer = None
@@ -107,12 +111,13 @@ if __name__ == "__main__":
                                        iou_cutoff = iou_cutoff,
                                        ber = ber,
                                        PLOT = SHOW,
-                                       OUTVID = OUTVID,
-                                       wer = 1.25)
+                                       OUT = OUTVID,
+                                       wer = 1.25,
+                                       checksum_path = checksum,
+                                       geom_path = geom)
         
         tracker.track()
         preds, Hz, time_metrics = tracker.get_results()
-        
         
         print("Finished sequence {}, tracked at {} fps".format(sequence,Hz))
         if SHOW:
