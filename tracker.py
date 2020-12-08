@@ -632,7 +632,8 @@ class Localization_Tracker():
         frame_stuff = next(self.loader)            
         if len(frame_stuff) == 5:
             (frame_num,frame,dim,original_im,timestamp) = frame_stuff
-            self.all_timestamps.append(timestamp[0])
+            if timestamp is not None:
+                self.all_timestamps.append(timestamp[0])
         else:
             (frame_num,frame,dim,original_im) = frame_stuff
             self.all_timestamps.append(-1)
@@ -801,8 +802,7 @@ class Localization_Tracker():
                     self.all_timestamps.append(timestamp[0])
             else:
                 (frame_num,frame,dim,original_im) = frame_stuff
-                if timestamp is not None:
-                    self.all_timestamps.append(-1)
+                self.all_timestamps.append(-1)
 
             
             torch.cuda.synchronize()
