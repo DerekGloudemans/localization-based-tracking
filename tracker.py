@@ -161,12 +161,15 @@ class Localization_Tracker():
 
         # update tracked and matched objects
         update_array = np.zeros([len(matchings),4])
+        update_classes = np.zeros(len(matchings))
         update_ids = []
         for i in range(len(matchings)):
             a = matchings[i,0] # index of pre_loc
             b = matchings[i,1] # index of detections
            
             update_array[i,:] = detections[b,:4]
+            update_classes[i] = detections[b,4]
+            
             update_ids.append(pre_ids[a])
             self.fsld[pre_ids[a]] = 0 # fsld = 0 since this id was detected this frame
         
@@ -174,7 +177,8 @@ class Localization_Tracker():
             self.filter.update2(update_array,update_ids)
           
             self.time_metrics['update'] += time.time() - start
-              
+        for i in range(len(update_ids)):
+            self.all_classes[update_ids[i]][int(update_classes[i])] += 1
         
         # for each detection not in matchings, add a new object
         start = time.time()
@@ -191,6 +195,8 @@ class Localization_Tracker():
                 self.fsld[self.next_obj_id] = 0
                 self.all_tracks[self.next_obj_id] = np.zeros([self.n_frames,self.state_size])
                 self.all_classes[self.next_obj_id] = np.zeros(13)
+                
+                self.all_classes[self.next_obj_id][int(detections[i,4])] += 1
                 
                 self.next_obj_id += 1
                 cur_row += 1
@@ -827,7 +833,7 @@ class Localization_Tracker():
             for key in self.time_metrics:
                 total_time += self.time_metrics[key]
             #framerate = self.frames_processed / total_time
-            framerate = self.frames_processed / (self.end_time - self.start_time())
+            framerate = self.frames_processed / (self.end_time - self.start_time)
 
         # get tracklet results 
         final_output = []
@@ -932,7 +938,7 @@ class Localization_Tracker():
                         obj_line.append(frame)
                         obj_line.append(timestamp)
                         obj_line.append(id)
-                        obj_line.append(self.class_dict[np.argmax(self.all_classes[id])])
+                        obj_line.append("Dummy Val")#obj_line.append(self.class_dict[np.argmax(self.all_classes[id])])
                         obj_line.append(bbox[0])
                         obj_line.append(bbox[2])
                         obj_line.append(bbox[1])

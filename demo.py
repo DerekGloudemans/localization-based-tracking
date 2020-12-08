@@ -18,13 +18,14 @@ from tracker import Localization_Tracker
 # CNNs
 detector_path = os.path.join(os.getcwd(),"models","pytorch_retinanet_detector")
 sys.path.insert(0,detector_path)
+from models.pytorch_retinanet_detector.retinanet.model import resnet50 
+
 localizer_path = os.path.join(os.getcwd(),"models","pytorch_retinanet_localizer")
 sys.path.insert(0,localizer_path)
-detrac_util_path = os.path.join(os.getcwd(),"util_detrac")
-sys.path.insert(0,detrac_util_path)
-from models.pytorch_retinanet_detector.retinanet.model import resnet50 
 from models.pytorch_retinanet_localizer.retinanet.model import resnet34
 
+detrac_util_path = os.path.join(os.getcwd(),"util_detrac")
+sys.path.insert(0,detrac_util_path)
 from util_detrac.detrac_detection_dataset import class_dict
 
 
@@ -42,7 +43,7 @@ if __name__ == "__main__":
     
      # parameters
      iou_cutoff = 0.75       # tracklets overlapping by this amount will be pruned
-     det_step = 5            # frames between full detection steps
+     det_step = 1            # frames between full detection steps
      skip_step = 1           # frames between update steps (either detection or localization)
      ber = 2.4               # amount by which to expand a priori tracklet to crop object
      init_frames = 1         # number of detection steps in a row to perform
@@ -67,11 +68,12 @@ if __name__ == "__main__":
      
      # load detector
      det_cp = os.path.join(os.getcwd(),"config","detector_state_dict.pt")
+     det_cp = os.path.join(os.getcwd(),"config","i24_detector_4k_state_dict_e69.pt")
      detector = resnet50(13)
      detector.load_state_dict(torch.load(det_cp))
-     detector = detector.to(device)
-     detector.eval()
-     detector.training = False   
+     # detector = detector.to(device)
+     # detector.eval()
+     # detector.training = False   
      
      # load filter
      filter_params = os.path.join(os.getcwd(),"config","filter_params_tuned.cpkl")

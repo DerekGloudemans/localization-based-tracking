@@ -196,6 +196,7 @@ def load_to_queue(image_queue,files,device,queue_size):
                   # keep as tensor
               original_im = np.array(im)[:,:,[2,1,0]].copy()
               im = F.to_tensor(im)
+              #im = F.resize(im,(1920,1080)) # downsample to 1080p
               im = F.normalize(im,mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
               dim = None
@@ -245,12 +246,9 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = N
                     # get timestamp
                     timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
                     if timestamp[0] is None:
-                        #print(original_im.shape)
-                        #cv2.imshow("frame",timestamp[1])
-                        #cv2.waitKey(0)
                         timestamp = None
-                    
-                original_im = cv2.resize(original_im,(1920,1080))
+                
+                #original_im = cv2.resize(original_im,(1920,1080))
                 im = F.to_tensor(original_im)
                 im = F.normalize(im,mean=[0.485, 0.456, 0.406],
                                           std=[0.229, 0.224, 0.225])
