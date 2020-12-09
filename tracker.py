@@ -52,7 +52,9 @@ class Localization_Tracker():
                  skip_step = 1,
                  checksum_path = None,
                  geom_path = None,
-                 output_dir= None):
+                 output_dir= None,
+                 com_queue = None,
+                 com_rate = 15):
         """
          Parameters
         ----------
@@ -98,6 +100,7 @@ class Localization_Tracker():
         
         # CUDA
         if device_id is not None:
+            self.device_id = device_id
             self.device = torch.device("cuda:{}".format(device_id))
             torch.cuda.empty_cache() 
         else:
@@ -155,6 +158,38 @@ class Localization_Tracker():
             "store":0,
             "plot":0
             }
+    
+        # for commmunicating with a manager process
+        if com_queue is not None:
+            self.com_queue = com_queue
+            self.com_rate = com_rate
+            self.last_com = 0
+            
+    def write_com_queue(self):
+        """
+        Writes current tracking information to com_queue for logging
+        """
+        
+        # get time spent on this track so far
+        track_time = time.time() - self.start_time
+        
+        # get framerate so far
+        track_speed = self.frames_processed/track_time
+        
+        # get last timestamp
+        last_timestamp = self.all_timestamps[-1]
+        
+        # get avg number of new unique objects per frame
+        new_objs_per_frame = self.next_obj_id / self.frames_processed
+        
+        # get PID
+        pid = os.getpid()
+        
+        ts = time.time()
+        key = "INFO"
+        message = "Worker {} (PID {}) tracker: Cur frame: {}, Time on this sequence so far: {}, Framerate so far: {} Avg new objs per frame: {} Last timestamp: {} ".format(
+            self.device_id,pid,self.frames_processed+1,track_time,track_speed,new_objs_per_frame,last_timestamp)
+        self.com_queue.put((ts,key,message,self.device_id))
     
     def manage_tracks(self,detections,matchings,pre_ids):
         """
@@ -272,7 +307,6 @@ class Localization_Tracker():
         self.time_metrics['pre_localize and align'] += time.time() - start
         
         return crops,new_boxes,box_ids,box_scales
-    
     
     def test_outputs(self,bboxes,crops):
         """
@@ -814,7 +848,10 @@ class Localization_Tracker():
             self.time_metrics["load"] = time.time() - start
             torch.cuda.empty_cache()
             
-        
+            if self.com_queue is not None:
+                if time.time() - self.last_com  > self.com_rate:
+                    self.write_com_queue()
+            
         # clean up at the end
         self.end_time = time.time()
         
