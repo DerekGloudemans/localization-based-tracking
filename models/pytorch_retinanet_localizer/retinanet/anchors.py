@@ -4,8 +4,12 @@ import torch.nn as nn
 
 
 class Anchors(nn.Module):
-    def __init__(self, pyramid_levels=None, strides=None, sizes=None, ratios=None, scales=None):
+    def __init__(self, pyramid_levels=None, strides=None, sizes=None, ratios=None, scales=None,device_id = None):
         super(Anchors, self).__init__()
+        
+        if device_id is None:
+            device_id = 0
+        self.device = torch.device("cuda:{}".format(device_id)) 
 
         if pyramid_levels is None:
             self.pyramid_levels = [3, 4, 5, 6, 7]
@@ -37,7 +41,7 @@ class Anchors(nn.Module):
         all_anchors = np.expand_dims(all_anchors, axis=0)
 
         if torch.cuda.is_available():
-            return torch.from_numpy(all_anchors.astype(np.float32)).cuda()
+            return torch.from_numpy(all_anchors.astype(np.float32)).to(self.device)
         else:
             return torch.from_numpy(all_anchors.astype(np.float32))
 

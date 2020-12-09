@@ -157,7 +157,12 @@ class ClassificationModel(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, num_classes, block, layers):
+    def __init__(self, num_classes, block, layers,device_id = None):
+        
+        if device_id is None:
+            device_id = 0
+        self.device = torch.device("cuda:{}".format(device_id)) 
+        
         self.inplanes = 64
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -183,7 +188,7 @@ class ResNet(nn.Module):
         self.regressionModel = RegressionModel(256)
         self.classificationModel = ClassificationModel(256, num_classes=num_classes)
 
-        self.anchors = Anchors()
+        self.anchors = Anchors(device_id = device_id)
 
         self.regressBoxes = BBoxTransform()
 
@@ -271,9 +276,9 @@ class ResNet(nn.Module):
             finalAnchorBoxesCoordinates = torch.Tensor([])
 
             if torch.cuda.is_available():
-                finalScores = finalScores.cuda()
-                finalAnchorBoxesIndexes = finalAnchorBoxesIndexes.cuda()
-                finalAnchorBoxesCoordinates = finalAnchorBoxesCoordinates.cuda()
+                finalScores = finalScores.to(self.device)
+                finalAnchorBoxesIndexes = finalAnchorBoxesIndexes.to(self.device)
+                finalAnchorBoxesCoordinates = finalAnchorBoxesCoordinates.to(self.device)
                 
             if LOCALIZE:
                 return transformed_anchors, classification
@@ -298,7 +303,7 @@ class ResNet(nn.Module):
                 finalScores = torch.cat((finalScores, scores[anchors_nms_idx]))
                 finalAnchorBoxesIndexesValue = torch.tensor([i] * anchors_nms_idx.shape[0])
                 if torch.cuda.is_available():
-                    finalAnchorBoxesIndexesValue = finalAnchorBoxesIndexesValue.cuda()
+                    finalAnchorBoxesIndexesValue = finalAnchorBoxesIndexesValue.to(self.device)
 
                 finalAnchorBoxesIndexes = torch.cat((finalAnchorBoxesIndexes, finalAnchorBoxesIndexesValue))
                 finalAnchorBoxesCoordinates = torch.cat((finalAnchorBoxesCoordinates, anchorBoxes[anchors_nms_idx]))

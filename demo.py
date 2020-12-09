@@ -56,11 +56,12 @@ if __name__ == "__main__":
     
      # enable CUDA
      use_cuda = torch.cuda.is_available()
-     device = torch.device("cuda:0" if use_cuda else "cpu")
+     device_id = 0
+     device = torch.device("cuda:{}".format(device_id) if use_cuda else "cpu")
     
      # load localizer
      loc_cp = os.path.join(os.getcwd(),"config","localizer_state_dict.pt")
-     localizer = resnet34(13)
+     localizer = resnet34(13,device_id = device_id)
      localizer.load_state_dict(torch.load(loc_cp))
      localizer = localizer.to(device)
      localizer.eval()
@@ -69,7 +70,7 @@ if __name__ == "__main__":
      # load detector
      det_cp = os.path.join(os.getcwd(),"config","detector_state_dict.pt")
      det_cp = os.path.join(os.getcwd(),"config","i24_detector_4k_state_dict_e69.pt")
-     detector = resnet50(13)
+     detector = resnet50(9,device_id = device_id)
      detector.load_state_dict(torch.load(det_cp))
      # detector = detector.to(device)
      # detector.eval()
@@ -104,6 +105,7 @@ if __name__ == "__main__":
                                        localizer,
                                        kf_params,
                                        class_dict,
+                                       device_id = device_id,
                                        det_step = det_step,
                                        skip_step = 1,
                                        init_frames = init_frames,

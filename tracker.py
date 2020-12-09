@@ -38,6 +38,7 @@ class Localization_Tracker():
                  localizer,
                  kf_params,
                  class_dict,
+                 device_id = None,
                  det_step = 1,
                  init_frames = 1,
                  fsld_max = 1,
@@ -96,9 +97,13 @@ class Localization_Tracker():
         self.state_size = kf_params["Q"].shape[0]
         
         # CUDA
-        use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda:0" if use_cuda else "cpu")
-        torch.cuda.empty_cache() 
+        if device_id is not None:
+            self.device = torch.device("cuda:{}".format(device_id))
+            torch.cuda.empty_cache() 
+        else:
+            use_cuda = torch.cuda.is_available()
+            self.device = torch.device("cuda:3" if use_cuda else "cpu")
+            torch.cuda.empty_cache() 
        
         # store detector and localizer
         try:
