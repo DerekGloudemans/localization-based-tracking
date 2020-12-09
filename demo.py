@@ -43,7 +43,7 @@ if __name__ == "__main__":
     
      # parameters
      iou_cutoff = 0.75       # tracklets overlapping by this amount will be pruned
-     det_step = 1            # frames between full detection steps
+     det_step = 10            # frames between full detection steps
      skip_step = 1           # frames between update steps (either detection or localization)
      ber = 2.4               # amount by which to expand a priori tracklet to crop object
      init_frames = 1         # number of detection steps in a row to perform
@@ -122,6 +122,7 @@ if __name__ == "__main__":
         
         tracker.track()
         preds, Hz, time_metrics = tracker.get_results()
+        tracker.write_results_csv()
         
         print("Finished sequence {}, tracked at {} fps".format(sequence,Hz))
         if SHOW:

@@ -884,7 +884,7 @@ class Localization_Tracker():
             "GPU"
             ]
         
-        # create header data
+        # create summary data
         summary = []
         summary.append(self.input_file_name)
         start_time_ms = str(np.round(self.start_time%1,2)).split(".")[1]
@@ -899,12 +899,43 @@ class Localization_Tracker():
         summary.append(self.next_obj_id) # gives correct count since 0-indexed
         summary.append(str(self.device))
         
+        # create time  data
         fps = self.frames_processed / (self.end_time - self.start_time)
         time_header = ["Processing fps"]
         time_data = [fps]
         for item in self.time_metrics.keys():
             time_header.append(item)
             time_data.append(self.time_metrics[item])
+        
+        
+        # create parameter data
+        parameter_header = [
+            "Detection step",
+            "Skip step",
+            "FSLD max",
+            "Device id",
+            "Init frames",
+            "Matching cutoff",
+            "IOU cutoff",
+            "Detector conf cutoff",
+            "Box expansion Rato",
+            "Localizer type",
+            "Detector type"
+            ]
+        
+        parameter_data = []
+        parameter_data.append(self.d)
+        parameter_data.append(self.s)
+        parameter_data.append(self.fsld_max)
+        parameter_data.append(str(self.device)),
+        parameter_data.append(self.init_frames)
+        parameter_data.append(self.matching_cutoff)
+        parameter_data.append(self.iou_cutoff)
+        parameter_data.append(self.det_conf_cutoff)
+        parameter_data.append(self.ber)
+        parameter_data.append(type(self.localizer))
+        parameter_data.append(type(self.detector))        
+        
         
         data_header = [
             "Frame #",
@@ -928,6 +959,11 @@ class Localization_Tracker():
             # write second chunk
             out.writerow(time_header)
             out.writerow(time_data)
+            out.writerow([])
+            
+            # write third chunk
+            out.writerow(parameter_header)
+            out.writerow(parameter_data)
             out.writerow([])
             
             # write main chunk
