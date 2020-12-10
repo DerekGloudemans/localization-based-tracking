@@ -11,6 +11,7 @@ import os,sys
 import numpy as np
 import random 
 import time
+import queue
 random.seed = 0
 
 import cv2
@@ -46,7 +47,7 @@ except:
         
 class FrameLoader():
     
-    def __init__(self,track_directory,device, buffer_size = 9,timestamp_geom_path = None,timestamp_checksum_path = None):
+    def __init__(self,track_directory,device, buffer_size = 15,timestamp_geom_path = None,timestamp_checksum_path = None,com_queue = None):
         
         """
         Parameters
@@ -70,7 +71,7 @@ class FrameLoader():
                 files.sort()    
         
             self.files = files
-            
+
             manager = mp.Manager()
             
             #self.det_step = det_step
@@ -80,6 +81,8 @@ class FrameLoader():
             #mp.set_start_method('spawn')
             ctx = mp.get_context('spawn')
             self.queue = ctx.Queue()
+            self.timeout = buffer_size
+            self.com_queue = com_queue
             
             self.frame_idx = -1
             
@@ -101,14 +104,16 @@ class FrameLoader():
             #mp.set_start_method('spawn')
             ctx = mp.get_context('spawn')
             self.queue = ctx.Queue()
+            self.timeout = buffer_size
+            self.com_queue = com_queue
             
             self.frame_idx = -1
             
             args=(self.queue,sequence,device,buffer_size,)
-            kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path}
+            kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path,"com_queue":com_queue}
             self.worker = ctx.Process(target=load_to_queue_video,args = args, kwargs=kwargs)
             self.worker.start()
-            time.sleep(5)
+            time.sleep(buffer_size)
         
     def __len__(self):
         """
@@ -138,13 +143,30 @@ class FrameLoader():
             image, image dimensions and original image
 
         """
-        frame = self.queue.get(timeout = 10)
-        self.frame_idx = frame[0]
-        
+        while True:
+            try:
+                frame = self.queue.get(timeout = self.timeout)
+                self.frame_idx = frame[0]
+                break
+            except queue.Empty:
+                worker_id = int(str(self.device).split(":")[1])
+                ts = time.time()
+                key = "WARNING"
+                message = "Loader {} main (PID {}) timed out __next__. Sleeping for 2 seconds.".format(worker_id,os.getpid()) 
+                self.com_queue.put((ts,key,message,worker_id))
+                time.sleep(2)
+
+            
         if self.frame_idx != -1:
             return frame
         
         else:
+            worker_id = int(str(self.device).split(":")[1])
+            ts = time.time()
+            key = "INFO"
+            message = "Loader {} main (PID {}) terminating worker.".format(worker_id,os.getpid()) 
+            self.com_queue.put((ts,key,message,worker_id))
+            
             self.worker.terminate()
             self.worker.join()
             return frame
@@ -219,7 +241,7 @@ def load_to_queue(image_queue,files,device,queue_size):
     while True:  
            time.sleep(5)
         
-def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = None,geom_path = None):
+def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = None,geom_path = None,com_queue = None):
     
     cap = cv2.VideoCapture(sequence)
     
@@ -227,46 +249,75 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = N
         checksums = get_precomputed_checksums(checksum_path)
         geom = get_timestamp_geometry(geom_path)
     
+    worker_id = int(str(device).split(":")[1])
+    
+    if com_queue is not None:
+        ts = time.time()
+        key = "INFO"
+        message = "Loader {} worker (PID {}) initialized successfully.".format(worker_id,os.getpid())
+        com_queue.put((ts,key,message,worker_id))
+    
     frame_idx = 0    
     while True:
         
         if image_queue.qsize() < queue_size:
             
+            try:
             
-            
-            # load next image from videocapture object
-            ret,original_im = cap.read()
-            if ret == False:
-                frame = (-1,None,None,None,None)
-                image_queue.put(frame)       
-                break
-            else:
-                timestamp = None
-                if checksum_path is not None:
-                    # get timestamp
-                    timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
-                    if timestamp[0] is None:
-                        timestamp = None
+                # load next image from videocapture object
+                ret,original_im = cap.read()
+                if ret == False:
+                    frame = (-1,None,None,None,None)
+                    image_queue.put(frame)
+                    
+                    if com_queue is not None:
+                        ts = time.time()
+                        key = "DEBUG"
+                        message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
+                        com_queue.put((ts,key,message,worker_id))
+                        
+                    break
                 
-                #original_im = cv2.resize(original_im,(1920,1080))
-                im = F.to_tensor(original_im)
-                im = F.normalize(im,mean=[0.485, 0.456, 0.406],
-                                          std=[0.229, 0.224, 0.225])
-                # store preprocessed image, dimensions and original image
-                im = im.to(device)
-                dim = None
-                frame = (frame_idx,im,dim,original_im,timestamp)
-             
-                # append to queue
-                image_queue.put(frame)       
-                frame_idx += 1
-    
+                else:
+                    timestamp = None
+                    if checksum_path is not None:
+                        # get timestamp
+                        timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
+                        if timestamp[0] is None:
+                            timestamp = None
+                    
+                    #original_im = cv2.resize(original_im,(1920,1080))
+                    im = F.to_tensor(original_im)
+                    im = F.normalize(im,mean=[0.485, 0.456, 0.406],
+                                              std=[0.229, 0.224, 0.225])
+                    # store preprocessed image, dimensions and original image
+                    im = im.to(device,non_blocking=True) # change back if this causes errors
+                    dim = None
+                    original_im = None # need to change this so that it passes the original image if
+                    frame = (frame_idx,im,dim,original_im,timestamp)
+                 
+                    # append to queue
+                    image_queue.put(frame)       
+                    frame_idx += 1
+            
+            except Exception as e:
+                if com_queue is not None:
+                    ts = time.time()
+                    key = "ERROR"
+                    message = "Loader {} worker (PID {}) error: .".format(worker_id,os.getpid(),e)
+                    com_queue.put((ts,key,message,worker_id))
+        
     # neverending loop, because if the process ends, the tensors originally
     # initialized in this function will be deleted, causing issues. Thus, this 
     # function runs until a call to self.next() returns -1, indicating end of track 
     # has been reached
+    if com_queue is not None:
+        ts = time.time()
+        key = "DEBUG"
+        message = "Loader {} worker (PID {}) waiting for loader to terminate worker process".format(worker_id,os.getpid())
+        com_queue.put((ts,key,message,worker_id))
     while True:  
-           time.sleep(5)
+        time.sleep(5)
     
     
 def test_frameloader(path,geom,checksum):

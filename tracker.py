@@ -121,7 +121,7 @@ class Localization_Tracker():
         # store filter params
         self.filter = Torch_KF(torch.device("cpu"),INIT = kf_params)
        
-        self.loader = FrameLoader(track_dir,self.device,buffer_size = 9,timestamp_checksum_path = checksum_path,timestamp_geom_path = geom_path)
+        self.loader = FrameLoader(track_dir,self.device,buffer_size = 9,timestamp_checksum_path = checksum_path,timestamp_geom_path = geom_path,com_queue = com_queue)
         #self.track_id = int(track_dir.split("MVI_")[-1])
         
         # create output image writer
@@ -171,25 +171,34 @@ class Localization_Tracker():
         """
         
         # get time spent on this track so far
-        track_time = time.time() - self.start_time
+        track_time = round(time.time() - self.start_time,2)
         
         # get framerate so far
-        track_speed = self.frames_processed/track_time
-        
+        track_speed = round(self.frames_processed/track_time,2)
+                            
         # get last timestamp
         last_timestamp = self.all_timestamps[-1]
         
         # get avg number of new unique objects per frame
-        new_objs_per_frame = self.next_obj_id / self.frames_processed
+        num_objs = self.next_obj_id 
         
         # get PID
         pid = os.getpid()
         
+        qlen = self.loader.queue.qsize()
+        
         ts = time.time()
-        key = "INFO"
-        message = "Worker {} (PID {}) tracker: Cur frame: {}, Time on this sequence so far: {}, Framerate so far: {} Avg new objs per frame: {} Last timestamp: {} ".format(
-            self.device_id,pid,self.frames_processed+1,track_time,track_speed,new_objs_per_frame,last_timestamp)
+        key = "DEBUG"
+        message = "Worker {} (PID {}) tracker: Cur frame: {}, Loader queue len: {} Time on this sequence so far: {}, Framerate so far: {} Unique objects: {} Last timestamp: {} ".format(
+            self.device_id,pid,self.frames_processed+1,qlen,track_time,track_speed,num_objs,last_timestamp)
         self.com_queue.put((ts,key,message,self.device_id))
+    
+    def log_error(self,error,custom_message = None):
+        ts = time.time()
+        key = "ERROR"
+        message = "Worker {} (PID {}) tracker: {} - {} - {}".format(self.device_id,os.getpid(),custom_message,type(error),error)
+        self.com_queue.put((ts,key,message,self.device_id))
+
     
     def manage_tracks(self,detections,matchings,pre_ids):
         """
@@ -679,24 +688,29 @@ class Localization_Tracker():
             
         while frame_num != -1:            
             
-            #if frame_num % self.d < self.init_frames:
-            # predict next object locations
-            start = time.time()
-            try: # in the case that there are no active objects will throw exception
-                self.filter.predict()
-                pre_locations = self.filter.objs()
-            except:
-                pre_locations = []    
+            try:
+                #if frame_num % self.d < self.init_frames:
+                # predict next object locations
+                start = time.time()
+                try: # in the case that there are no active objects will throw exception
+                    self.filter.predict()
+                    pre_locations = self.filter.objs()
+                except:
+                    pre_locations = []    
+                    
+                pre_ids = []
+                pre_loc = []
+                for id in pre_locations:
+                    pre_ids.append(id)
+                    pre_loc.append(pre_locations[id])
+                pre_loc = np.array(pre_loc)  
                 
-            pre_ids = []
-            pre_loc = []
-            for id in pre_locations:
-                pre_ids.append(id)
-                pre_loc.append(pre_locations[id])
-            pre_loc = np.array(pre_loc)  
+                self.time_metrics['predict'] += time.time() - start
             
-            self.time_metrics['predict'] += time.time() - start
-        
+            except Exception as e:
+                if self.com_queue is not None:
+                    self.log_error(e,custom_message = "Filter prediction error")
+             
             # check1 = len(pre_loc)
             # try:
             #     check2 = torch.sqrt(torch.sum(self.filter.X[:,4]) + torch.sum(self.filter.X[:,5]))
@@ -705,153 +719,178 @@ class Localization_Tracker():
             
             if frame_num % self.d < self.init_frames:  
                 
-                # detection step
-                try: # use CNN detector
-                    start = time.time()
-                    with torch.no_grad():                       
-                        scores,labels,boxes = self.detector(frame.unsqueeze(0))            
-                        torch.cuda.synchronize(self.device)
-                    self.time_metrics['detect'] += time.time() - start
+                try:
+                    # detection step
+                    try: # use CNN detector
+                        start = time.time()
+                        with torch.no_grad():                       
+                            scores,labels,boxes = self.detector(frame.unsqueeze(0))            
+                            torch.cuda.synchronize(self.device)
+                        self.time_metrics['detect'] += time.time() - start
+                        
+                        # move detections to CPU
+                        start = time.time()
+                        scores = scores.cpu()
+                        labels = labels.cpu()
+                        boxes = boxes.cpu()
+                        self.time_metrics['load'] += time.time() - start
                     
-                    # move detections to CPU
+                    except: # use mock detector
+                        scores,labels,boxes,time_taken = self.detector(self.track_id,frame_num)
+                        self.time_metrics["detect"] += time_taken
+                        
+                   
+        
+                    # postprocess detections
                     start = time.time()
-                    scores = scores.cpu()
-                    labels = labels.cpu()
-                    boxes = boxes.cpu()
-                    self.time_metrics['load'] += time.time() - start
+                    detections = self.parse_detections(scores,labels,boxes)
+                    self.time_metrics['parse'] += time.time() - start
                 
-                except: # use mock detector
-                    scores,labels,boxes,time_taken = self.detector(self.track_id,frame_num)
-                    self.time_metrics["detect"] += time_taken
-                    
                
-    
-                # postprocess detections
-                start = time.time()
-                detections = self.parse_detections(scores,labels,boxes)
-                self.time_metrics['parse'] += time.time() - start
-             
-                # match using Hungarian Algorithm        
-                start = time.time()
-                # matchings[i] = [a,b] where a is index of pre_loc and b is index of detection
-                matchings = self.match_hungarian(pre_loc,detections,dist_threshold = self.matching_cutoff)
-                self.time_metrics['match'] += time.time() - start
+                    
+                    # match using Hungarian Algorithm        
+                    start = time.time()
+                    # matchings[i] = [a,b] where a is index of pre_loc and b is index of detection
+                    matchings = self.match_hungarian(pre_loc,detections,dist_threshold = self.matching_cutoff)
+                    self.time_metrics['match'] += time.time() - start
+                    
+                    # Update tracked objects
+                    self.manage_tracks(detections,matchings,pre_ids)
                 
-                # Update tracked objects
-                self.manage_tracks(detections,matchings,pre_ids)
-                
+                except Exception as e:
+                    if self.com_queue is not None:
+                        self.log_error(e,custom_message = "Detection error")
+                        
             # skip  if there are no active tracklets or no localizer (KF prediction with no update)    
             elif len(pre_locations) > 0 and self.localizer is not None and (frame_num % self.d)%self.s == 0:
                 
-                # get crop for each active tracklet
-                crops,new_boxes,box_ids,box_scales = self.crop_tracklets(pre_locations,frame)
-                
-                
-                # localize objects using localizer
-                start= time.time()
-                with torch.no_grad():                       
-                     reg_boxes, classes = self.localizer(crops,LOCALIZE = True)
-
-
+                try:
+                    # get crop for each active tracklet
+                    crops,new_boxes,box_ids,box_scales = self.crop_tracklets(pre_locations,frame)
                     
-                del crops
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                self.time_metrics['localize'] += time.time() - start
-                start = time.time()
-                
-               
-                # convert to global coords
-                
-                reg_boxes = reg_boxes.data.cpu()
-                classes = classes.data.cpu()
-                self.time_metrics["load"] += time.time() - start
-                start = time.time()
-
-                reg_boxes = self.local_to_global(reg_boxes,box_scales,new_boxes)
-                
-                # parse retinanet detections
-                confs,classes = torch.max(classes, dim = 2)
-                
-                # use original bboxes to weight best bboxes 
-                n_anchors = reg_boxes.shape[1]
-                a_priori = torch.from_numpy(pre_loc[:,:4])
-                # bs = torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)
-                # a_priori = a_priori * 224/bs
-                a_priori = a_priori.unsqueeze(1).repeat(1,n_anchors,1)
-                
-                iou_score = self.md_iou(a_priori.double(),reg_boxes.double())
-                score = confs + iou_score
-                best_scores ,keep = torch.max(score,dim = 1)
-                
-                idx = torch.arange(reg_boxes.shape[0])
-                detections = reg_boxes[idx,keep,:]
-                cls_preds = classes[idx,keep]
-                
-                self.time_metrics["post_localize"] += time.time() -start
-                start = time.time()
-                
-                # store class predictions
-                for i in range(len(cls_preds)):
-                    self.all_classes[box_ids[i]][cls_preds[i].item()] += 1
-
-
-                
-                # map regressed bboxes directly to objects for update step
-                self.filter.update(detections,box_ids)
-                self.time_metrics['update'] += time.time() - start
-                
-                # increment all fslds
-                for i in range(len(pre_ids)):
-                        self.fsld[pre_ids[i]] += 1
+                    
+                    # localize objects using localizer
+                    start= time.time()
+                    with torch.no_grad():                       
+                         reg_boxes, classes = self.localizer(crops,LOCALIZE = True)
+    
+    
+                        
+                    del crops
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    self.time_metrics['localize'] += time.time() - start
+                    start = time.time()
+                    
+                   
+                    # convert to global coords
+                    
+                    reg_boxes = reg_boxes.data.cpu()
+                    classes = classes.data.cpu()
+                    self.time_metrics["load"] += time.time() - start
+                    start = time.time()
+    
+                    reg_boxes = self.local_to_global(reg_boxes,box_scales,new_boxes)
+                    
+                    # parse retinanet detections
+                    confs,classes = torch.max(classes, dim = 2)
+                    
+                    # use original bboxes to weight best bboxes 
+                    n_anchors = reg_boxes.shape[1]
+                    a_priori = torch.from_numpy(pre_loc[:,:4])
+                    # bs = torch.from_numpy(box_scales).unsqueeze(1).repeat(1,4)
+                    # a_priori = a_priori * 224/bs
+                    a_priori = a_priori.unsqueeze(1).repeat(1,n_anchors,1)
+                    
+                    iou_score = self.md_iou(a_priori.double(),reg_boxes.double())
+                    score = confs + iou_score
+                    best_scores ,keep = torch.max(score,dim = 1)
+                    
+                    idx = torch.arange(reg_boxes.shape[0])
+                    detections = reg_boxes[idx,keep,:]
+                    cls_preds = classes[idx,keep]
+                    
+                    self.time_metrics["post_localize"] += time.time() -start
+                    start = time.time()
+                    
+                    # store class predictions
+                    for i in range(len(cls_preds)):
+                        self.all_classes[box_ids[i]][cls_preds[i].item()] += 1
+    
+    
+                    
+                    # map regressed bboxes directly to objects for update step
+                    self.filter.update(detections,box_ids)
+                    self.time_metrics['update'] += time.time() - start
+                    
+                    # increment all fslds
+                    for i in range(len(pre_ids)):
+                            self.fsld[pre_ids[i]] += 1
+                            
+                except Exception as e:
+                    if self.com_queue is not None:
+                        self.log_error(e,custom_message = "Localization error")
         
+        
+            try:        
                 # remove overlapping objects and anomalies
                 self.remove_overlaps()
                 self.remove_anomalies()
-                
-                
-            # get all object locations and store in output dict
-            start = time.time()
-            try:
-                post_locations = self.filter.objs()
-            except:
-                post_locations = {}
-            for id in post_locations:
+                    
+                    
+                # get all object locations and store in output dict
+                start = time.time()
                 try:
-                   self.all_tracks[id][frame_num,:] = post_locations[id][:self.state_size]   
-                except IndexError:
-                    print("Index Error")
-            self.time_metrics['store'] += time.time() - start  
+                    post_locations = self.filter.objs()
+                except:
+                    post_locations = {}
+                for id in post_locations:
+                    try:
+                       self.all_tracks[id][frame_num,:] = post_locations[id][:self.state_size]   
+                    except IndexError:
+                        print("Index Error")
+                self.time_metrics['store'] += time.time() - start  
+                
+                
+                # 10. Plot
+                start = time.time()
+                if self.PLOT:
+                    self.plot(original_im,detections,post_locations,self.all_classes,self.class_dict,frame = frame_num)
+                self.time_metrics['plot'] += time.time() - start
+           
+                # load next frame  
+                self.frames_processed += 1
+                start = time.time()
             
+            except Exception as e:
+                    if self.com_queue is not None:
+                        self.log_error(e,custom_message = "Postprocess/plotting error")
             
-            # 10. Plot
-            start = time.time()
-            if self.PLOT:
-                self.plot(original_im,detections,post_locations,self.all_classes,self.class_dict,frame = frame_num)
-            self.time_metrics['plot'] += time.time() - start
-       
-            # load next frame  
-            self.frames_processed += 1
-            start = time.time()
+            try:
+                frame_stuff = next(self.loader)            
+                if len(frame_stuff) == 5:
+                    (frame_num,frame,dim,original_im,timestamp) = frame_stuff
+                    if timestamp is not None:
+                        self.all_timestamps.append(timestamp[0])
+                else:
+                    (frame_num,frame,dim,original_im) = frame_stuff
+                    self.all_timestamps.append(-1)
+    
+                
+                torch.cuda.synchronize()
+                self.time_metrics["load"] = time.time() - start
+                torch.cuda.empty_cache()
+                
+                if self.com_queue is not None:
+                    if time.time() - self.last_com  > self.com_rate:
+                        self.write_com_queue()
+                        self.last_com = time.time()
             
-            frame_stuff = next(self.loader)            
-            if len(frame_stuff) == 5:
-                (frame_num,frame,dim,original_im,timestamp) = frame_stuff
-                if timestamp is not None:
-                    self.all_timestamps.append(timestamp[0])
-            else:
-                (frame_num,frame,dim,original_im) = frame_stuff
-                self.all_timestamps.append(-1)
-
-            
-            torch.cuda.synchronize()
-            self.time_metrics["load"] = time.time() - start
-            torch.cuda.empty_cache()
-            
-            if self.com_queue is not None:
-                if time.time() - self.last_com  > self.com_rate:
-                    self.write_com_queue()
-            
+            except Exception as e:
+                if self.com_queue is not None:
+                    self.log_error(e,custom_message = "Loader error:")
+                
+                
         # clean up at the end
         self.end_time = time.time()
         
@@ -1007,7 +1046,10 @@ class Localization_Tracker():
             out.writerow(data_header)
             
             for frame in range(self.frames_processed):
-                timestamp = self.all_timestamps[frame]
+                try:
+                    timestamp = self.all_timestamps[frame]
+                except:
+                    timestamp = -1
                 
                 for id in self.all_tracks:
                     bbox = self.all_tracks[id][frame]
