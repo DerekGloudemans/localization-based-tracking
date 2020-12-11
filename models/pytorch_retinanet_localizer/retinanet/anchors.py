@@ -23,7 +23,7 @@ class Anchors(nn.Module):
             self.ratios = np.array([0.5,1,1.25])
         if scales is None:
             self.scales = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)])
-            self.scales = np.array([ 2 ** (2.0 / 3.0),2**1, 2**(4.0/3.0)])
+            #self.scales = np.array([ 2 ** (2.0 / 3.0),2**1, 2**(4.0/3.0)]) # if you're having a bbox scale error, try uncommenting this line
     def forward(self, image):
         
         image_shape = image.shape[2:]

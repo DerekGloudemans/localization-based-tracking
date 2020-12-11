@@ -164,6 +164,8 @@ class Localization_Tracker():
             self.com_queue = com_queue
             self.com_rate = com_rate
             self.last_com = 0
+        else:
+            self.com_queue = None
             
     def write_com_queue(self):
         """
@@ -465,7 +467,7 @@ class Localization_Tracker():
         
         return iou
 
-    def plot(self,im,detections,post_locations,all_classes,class_dict,frame = None):
+    def plot(self,orig_im,tensor_im,detections,post_locations,all_classes,class_dict,frame = None):
         """
         Description
         -----------
@@ -490,8 +492,17 @@ class Localization_Tracker():
             If not none, the resulting image will be saved with this frame number in file name.
             The default is None.
         """
-        
-        im = im.copy()/255.0
+        if orig_im is None:
+            im = tensor_im
+            im = F.normalize(im,mean = [-0.485/0.229, -0.456/0.224, -0.406/0.225],
+                                           std = [1/0.229, 1/0.224, 1/0.225])
+            im = F.to_pil_image(im.cpu())
+            open_cv_image = np.array(im)
+            im = open_cv_image.copy()/255.0
+            
+        else:
+            im = orig_im
+            im = im.copy()/255.0
     
         # plot detection bboxes
         for det in detections:
@@ -855,7 +866,7 @@ class Localization_Tracker():
                 # 10. Plot
                 start = time.time()
                 if self.PLOT:
-                    self.plot(original_im,detections,post_locations,self.all_classes,self.class_dict,frame = frame_num)
+                    self.plot(original_im,frame,detections,post_locations,self.all_classes,self.class_dict,frame = frame_num)
                 self.time_metrics['plot'] += time.time() - start
            
                 # load next frame  
@@ -1066,6 +1077,10 @@ class Localization_Tracker():
                         
                         out.writerow(obj_line)
             
+        ts = time.time()
+        key = "DEBUG"
+        message = "Worker {} (PID {}) tracker: Wrote output file {}".format(self.device_id,os.getpid(),outfile)
+        self.com_queue.put((ts,key,message,self.device_id))
             
             
         
