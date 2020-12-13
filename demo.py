@@ -93,7 +93,7 @@ if __name__ == "__main__":
                  kf_params["R2"] /= 50 
                                          
      # get all sequences
-     for sequence in os.listdir(track_dir)[3:]:
+     for sequence in os.listdir(track_dir):
         if sequence == "example_outputs" or ".cpkl" in sequence:
             continue
         

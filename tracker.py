@@ -121,7 +121,10 @@ class Localization_Tracker():
         # store filter params
         self.filter = Torch_KF(torch.device("cpu"),INIT = kf_params)
        
-        self.loader = FrameLoader(track_dir,self.device,buffer_size = 9,timestamp_checksum_path = checksum_path,timestamp_geom_path = geom_path,com_queue = com_queue)
+        loader_s = self.s if not PLOT else 1
+        loader_d = self.d if not PLOT else 1 # need every frame if we're going to plot them
+        
+        self.loader = FrameLoader(track_dir,self.device,buffer_size = 9,timestamp_checksum_path = checksum_path,timestamp_geom_path = geom_path,com_queue = com_queue,s=loader_s,d = loader_d)
         #self.track_id = int(track_dir.split("MVI_")[-1])
         
         # create output image writer
@@ -688,11 +691,13 @@ class Localization_Tracker():
         self.start_time = time.time()
         
         
-        frame_stuff = next(self.loader)            
+        frame_stuff = next(self.loader)     
         if len(frame_stuff) == 5:
             (frame_num,frame,dim,original_im,timestamp) = frame_stuff
             if timestamp is not None:
                 self.all_timestamps.append(timestamp[0])
+            else:
+                self.all_timestamps.append(None)
         else:
             (frame_num,frame,dim,original_im) = frame_stuff
             self.all_timestamps.append(-1)
@@ -878,7 +883,9 @@ class Localization_Tracker():
                         self.log_error(e,custom_message = "Postprocess/plotting error")
             
             try:
-                frame_stuff = next(self.loader)            
+                frame_stuff = next(self.loader)  
+                #print(frame_stuff[0],type(frame_stuff[1]),frame_stuff[4])
+
                 if len(frame_stuff) == 5:
                     (frame_num,frame,dim,original_im,timestamp) = frame_stuff
                     if timestamp is not None:
@@ -1028,11 +1035,12 @@ class Localization_Tracker():
             "Frame #",
             "Timestamp",
             "Object ID",
-            "Object Class",
+            "Object class",
             "BBox xmin",
             "BBox ymin",
             "BBox xmax",
-            "BBox ymax"
+            "BBox ymax",
+            "Generation method"
             ]
         
         with open(outfile, mode='w') as f:
@@ -1062,6 +1070,13 @@ class Localization_Tracker():
                 except:
                     timestamp = -1
                 
+                if frame % self.d == 0:
+                    gen = "Detector"
+                elif self.localizer is not None and (frame % self.d)%self.s == 0:
+                    gen = "Localizer"
+                else:
+                    gen = "Filter prediction"
+                
                 for id in self.all_tracks:
                     bbox = self.all_tracks[id][frame]
                     if bbox[0] != 0:
@@ -1074,13 +1089,14 @@ class Localization_Tracker():
                         obj_line.append(bbox[2])
                         obj_line.append(bbox[1])
                         obj_line.append(bbox[3])
-                        
+                        obj_line.append(gen)
                         out.writerow(obj_line)
-            
-        ts = time.time()
-        key = "DEBUG"
-        message = "Worker {} (PID {}) tracker: Wrote output file {}".format(self.device_id,os.getpid(),outfile)
-        self.com_queue.put((ts,key,message,self.device_id))
+                        
+        if self.com_queue is not None:   
+            ts = time.time()
+            key = "DEBUG"
+            message = "Worker {} (PID {}) tracker: Wrote output file {}".format(self.device_id,os.getpid(),outfile)
+            self.com_queue.put((ts,key,message,self.device_id))
             
             
         

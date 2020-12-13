@@ -47,7 +47,7 @@ except:
         
 class FrameLoader():
     
-    def __init__(self,track_directory,device, buffer_size = 15,timestamp_geom_path = None,timestamp_checksum_path = None,com_queue = None):
+    def __init__(self,track_directory,device, buffer_size = 15,timestamp_geom_path = None,timestamp_checksum_path = None,com_queue = None,s=1,d=1):
         
         """
         Parameters
@@ -110,7 +110,7 @@ class FrameLoader():
             self.frame_idx = -1
             
             args=(self.queue,sequence,device,buffer_size,)
-            kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path,"com_queue":com_queue}
+            kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path,"com_queue":com_queue,"s":s,"d":d}
             self.worker = ctx.Process(target=load_to_queue_video,args = args, kwargs=kwargs)
             self.worker.start()
             time.sleep(buffer_size)
@@ -161,11 +161,12 @@ class FrameLoader():
             return frame
         
         else:
-            worker_id = int(str(self.device).split(":")[1])
-            ts = time.time()
-            key = "INFO"
-            message = "Loader {} main (PID {}) terminating worker.".format(worker_id,os.getpid()) 
-            self.com_queue.put((ts,key,message,worker_id))
+            if self.com_queue is not None:
+                worker_id = int(str(self.device).split(":")[1])
+                ts = time.time()
+                key = "INFO"
+                message = "Loader {} main (PID {}) terminating worker.".format(worker_id,os.getpid()) 
+                self.com_queue.put((ts,key,message,worker_id))
             
             self.worker.terminate()
             self.worker.join()
@@ -241,7 +242,7 @@ def load_to_queue(image_queue,files,device,queue_size):
     while True:  
            time.sleep(5)
         
-def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = None,geom_path = None,com_queue = None):
+def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_path = None,geom_path = None,com_queue = None):
     
     cap = cv2.VideoCapture(sequence)
     
@@ -284,55 +285,79 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = N
             
                 # load next image from videocapture object
                 start = time.time()
-                ret,original_im = cap.read()
-                time_metrics["decode"] += time.time() - start
+                ret = cap.grab()
                 
-                if ret == False:
-                    frame = (-1,None,None,None,None)
-                    image_queue.put(frame)
+                if ret and (frame_idx %d == 0 or (frame_idx % d)%s == 0): # only decode the frame if we have to
+                    ret, original_im = cap.retrieve()
+                
+                    time_metrics["decode"] += time.time() - start
                     
-                    if com_queue is not None:
-                        ts = time.time()
-                        key = "DEBUG"
-                        message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
-                        com_queue.put((ts,key,message,worker_id))
+                    if ret == False:
+                        frame = (-1,None,None,None,None)
+                        image_queue.put(frame)
                         
-                    break
-                
-                else:
-                    start = time.time()
-                    timestamp = None
-                    if checksum_path is not None:
-                        # get timestamp
-                        timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
-                        if timestamp[0] is None:
-                            timestamp = None
-                    time_metrics["timestamp"] += time.time() - start
-
-                    start = time.time()
-                    #original_im = cv2.resize(original_im,(1920,1080))
-                    im = F.to_tensor(original_im)
-                    time_metrics["tensor"] += time.time() - start
-
+                        if com_queue is not None:
+                            ts = time.time()
+                            key = "DEBUG"
+                            message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
+                            com_queue.put((ts,key,message,worker_id))
+                            
+                        break
                     
-                    start = time.time()
-                    im = F.normalize(im,mean=[0.485, 0.456, 0.406],
-                                              std=[0.229, 0.224, 0.225])
-                    time_metrics["preprocess"] += time.time() - start
-
-                    # store preprocessed image, dimensions and original image
-                    start = time.time()
-                    im = im.to(device,non_blocking=True) # change back if this causes errors
-                    dim = None
-                    original_im = None # need to change this so that it passes the original image if
-                    frame = (frame_idx,im,dim,original_im,timestamp)
-                    time_metrics["transfer"] += time.time() - start
-
-                    # append to queue
-                    start = time.time()
-                    image_queue.put(frame)       
-                    frame_idx += 1
-                    time_metrics["queue"] += time.time() - start
+                    else:
+                        start = time.time()
+                        timestamp = None
+                        if checksum_path is not None:
+                            # get timestamp
+                            timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
+                            if timestamp[0] is None:
+                                timestamp = None
+                        time_metrics["timestamp"] += time.time() - start
+    
+                        start = time.time()
+                        #original_im = cv2.resize(original_im,(1920,1080))
+                        im = F.to_tensor(original_im)
+                        time_metrics["tensor"] += time.time() - start
+    
+                        
+                        start = time.time()
+                        im = F.normalize(im,mean=[0.485, 0.456, 0.406],
+                                                  std=[0.229, 0.224, 0.225])
+                        time_metrics["preprocess"] += time.time() - start
+    
+                        # store preprocessed image, dimensions and original image
+                        start = time.time()
+                        im = im.to(device,non_blocking=True) # change back if this causes errors
+                        dim = None
+                        original_im = None # need to change this so that it passes the original image if
+                        frame = (frame_idx,im,dim,original_im,timestamp)
+                        time_metrics["transfer"] += time.time() - start
+    
+                        # append to queue
+                        start = time.time()
+                        image_queue.put(frame)       
+                        frame_idx += 1
+                        time_metrics["queue"] += time.time() - start
+                        
+                else: # otherwise, pass a dummy value if the frame won't be used anyway
+                    time_metrics["decode"] += time.time() - start
+                    
+                    if ret == False:
+                        frame = (-1,None,None,None,None)
+                        image_queue.put(frame)
+                        
+                        if com_queue is not None:
+                            ts = time.time()
+                            key = "DEBUG"
+                            message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
+                            com_queue.put((ts,key,message,worker_id))
+                            
+                        break
+                    
+                    else:
+                        frame = (frame_idx,None,None,None,None)
+                        image_queue.put(frame)
+                        frame_idx +=1
 
             
             except Exception as e:
