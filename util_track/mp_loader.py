@@ -257,15 +257,36 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = N
         message = "Loader {} worker (PID {}) initialized successfully.".format(worker_id,os.getpid())
         com_queue.put((ts,key,message,worker_id))
     
+    time_metrics = {"decode":1e-04,
+                    "timestamp":1e-04,
+                    "tensor":1e-04,
+                    "preprocess":1e-04,
+                    "transfer":1e-04,
+                    "queue":1e-04}
+    
     frame_idx = 0    
     while True:
         
         if image_queue.qsize() < queue_size:
             
+            
+            if com_queue is not None and frame_idx % 100 == 0:
+                total = sum([time_metrics[key] for key in time_metrics])
+                tutil = []
+                for key in time_metrics:
+                    tutil.append("{}:{}s ({}%)".format(key,round(time_metrics[key]/(frame_idx+1e-04),4),round(time_metrics[key]/total*100,1)))
+                message = "Loader {} worker (PID {}) time utilization: {}".format(worker_id,os.getpid(),tutil)
+                ts = time.time()
+                key = "INFO"
+                com_queue.put((ts,key,message,worker_id))
+
             try:
             
                 # load next image from videocapture object
+                start = time.time()
                 ret,original_im = cap.read()
+                time_metrics["decode"] += time.time() - start
+                
                 if ret == False:
                     frame = (-1,None,None,None,None)
                     image_queue.put(frame)
@@ -279,26 +300,40 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,checksum_path = N
                     break
                 
                 else:
+                    start = time.time()
                     timestamp = None
                     if checksum_path is not None:
                         # get timestamp
                         timestamp = parse_frame_timestamp(frame_pixels = original_im, timestamp_geometry = geom, precomputed_checksums = checksums)
                         if timestamp[0] is None:
                             timestamp = None
-                    
+                    time_metrics["timestamp"] += time.time() - start
+
+                    start = time.time()
                     #original_im = cv2.resize(original_im,(1920,1080))
                     im = F.to_tensor(original_im)
+                    time_metrics["tensor"] += time.time() - start
+
+                    
+                    start = time.time()
                     im = F.normalize(im,mean=[0.485, 0.456, 0.406],
                                               std=[0.229, 0.224, 0.225])
+                    time_metrics["preprocess"] += time.time() - start
+
                     # store preprocessed image, dimensions and original image
+                    start = time.time()
                     im = im.to(device,non_blocking=True) # change back if this causes errors
                     dim = None
                     original_im = None # need to change this so that it passes the original image if
                     frame = (frame_idx,im,dim,original_im,timestamp)
-                 
+                    time_metrics["transfer"] += time.time() - start
+
                     # append to queue
+                    start = time.time()
                     image_queue.put(frame)       
                     frame_idx += 1
+                    time_metrics["queue"] += time.time() - start
+
             
             except Exception as e:
                 if com_queue is not None:
