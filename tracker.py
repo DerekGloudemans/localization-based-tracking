@@ -52,6 +52,7 @@ class Localization_Tracker():
                  skip_step = 1,
                  checksum_path = None,
                  geom_path = None,
+                 transform_path = None,
                  output_dir= None,
                  com_queue = None,
                  com_rate = 15):
@@ -97,6 +98,7 @@ class Localization_Tracker():
         self.PLOT = PLOT
         self.wer = wer
         self.state_size = kf_params["Q"].shape[0]
+        self.transform_path = transform_path
         
         # CUDA
         if device_id is not None:
@@ -966,7 +968,7 @@ class Localization_Tracker():
             outfile = os.path.join(self.output_dir,outfile.split("/")[-1])
 
         
-        # create headers
+        # create summary headers
         summary_header = [
             "Video sequence name",
             "Processing start time",
@@ -993,7 +995,9 @@ class Localization_Tracker():
         summary.append(self.next_obj_id) # gives correct count since 0-indexed
         summary.append(str(self.device))
         
-        # create time  data
+        
+        
+        # create time header and data
         fps = self.frames_processed / (self.end_time - self.start_time)
         time_header = ["Processing fps"]
         time_data = [fps]
@@ -1002,7 +1006,7 @@ class Localization_Tracker():
             time_data.append(self.time_metrics[item])
         
         
-        # create parameter data
+        # create parameter header and data
         parameter_header = [
             "Detection step",
             "Skip step",
@@ -1031,6 +1035,8 @@ class Localization_Tracker():
         parameter_data.append(type(self.detector))        
         
         
+        
+        # create main data header
         data_header = [
             "Frame #",
             "Timestamp",
@@ -1040,8 +1046,15 @@ class Localization_Tracker():
             "BBox ymin",
             "BBox xmax",
             "BBox ymax",
-            "Generation method"
+            "Generation method",
+            "GPS lat of bbox bottom center",
+            "GPS long of bbox bottom center"
             ]
+        
+        # get perspective trasform camera -> GPS
+        M = self.parse_transform_file()
+        
+        
         
         with open(outfile, mode='w') as f:
             out = csv.writer(f, delimiter=',')
@@ -1090,6 +1103,16 @@ class Localization_Tracker():
                         obj_line.append(bbox[1])
                         obj_line.append(bbox[3])
                         obj_line.append(gen)
+                        
+                        centx = (bbox[0]+bbox[2])/2.0
+                        centy = (bbox[1]+bbox[3])/2.0
+                        cent = np.zeros([1,2],np.float32)
+                        cent[0,0] = centx
+                        cent[0,1] = centy
+                        gps_pt = self.transform_pt_array(cent,M)
+                        obj_line.append(gps_pt[0,0])
+                        obj_line.append(gps_pt[0,1])
+                        
                         out.writerow(obj_line)
                         
         if self.com_queue is not None:   
@@ -1099,4 +1122,64 @@ class Localization_Tracker():
             self.com_queue.put((ts,key,message,self.device_id))
             
             
+    def transform_pt_array(self,point_array,M):
+        """
+        Applies 3 x 3  image transformation matrix M to each point stored in the point array
+        """
         
+        original_shape = point_array.shape
+        
+        num_points = int(np.size(point_array,0)*np.size(point_array,1)/2)
+        # resize array into N x 2 array
+        reshaped = point_array.reshape((num_points,2))   
+        
+        # add third row
+        ones = np.ones([num_points,1])
+        points3d = np.concatenate((reshaped,ones),1)
+        
+        # transform points
+        tf_points3d = np.transpose(np.matmul(M,np.transpose(points3d)))
+        
+        # condense to two-dimensional coordinates
+        tf_points = np.zeros([num_points,2])
+        tf_points[:,0] = tf_points3d[:,0]/tf_points3d[:,2]
+        tf_points[:,1] = tf_points3d[:,1]/tf_points3d[:,2]
+        
+        tf_point_array = tf_points.reshape(original_shape)
+        
+        return tf_point_array     
+
+
+
+    def parse_transform_file(self):
+        camera_id = self.input_file_name.split("/")[-1].split("_")[1]
+        
+        gps_points = []
+        camera_points = []
+        with open(self.transform_path,'r') as f:
+            csv_reader = csv.reader(f, delimiter=',')
+            
+            line_count = 0
+            for row in csv_reader:
+                if line_count == 0:
+                    #print(f'Column names are {", ".join(row)}')
+                    line_count += 1
+                else:
+                   if row[0].lower() == camera_id:
+                       gps_lat = row[1]
+                       gps_lon = row[2]
+                       cam_x = row[3]
+                       cam_y = row[4]
+                       
+                       gps_points.append(np.array([gps_lat,gps_lon]))
+                       camera_points.append(np.array([cam_x,cam_y]))
+           
+            if len(gps_points) != 4:
+                raise Exception("Transform parser did not find the right number of matching coordinates for camera id {}".format(camera_id))
+            else:
+                gps_points = np.array(gps_points,np.float32)
+                camera_points = np.array(camera_points,np.float32)
+                M = cv2.getPerspectiveTransform(camera_points,gps_points)
+                return M
+
+                
