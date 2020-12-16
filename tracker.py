@@ -739,23 +739,23 @@ class Localization_Tracker():
                 
                 try:
                     # detection step
-                    try: # use CNN detector
-                        start = time.time()
-                        with torch.no_grad():                       
-                            scores,labels,boxes = self.detector(frame.unsqueeze(0))            
-                            torch.cuda.synchronize(self.device)
-                        self.time_metrics['detect'] += time.time() - start
-                        
-                        # move detections to CPU
-                        start = time.time()
-                        scores = scores.cpu()
-                        labels = labels.cpu()
-                        boxes = boxes.cpu()
-                        self.time_metrics['load'] += time.time() - start
+                    # try: # use CNN detector
+                    start = time.time()
+                    with torch.no_grad():                       
+                        scores,labels,boxes = self.detector(frame.unsqueeze(0))            
+                        torch.cuda.synchronize(self.device)
+                    self.time_metrics['detect'] += time.time() - start
                     
-                    except: # use mock detector
-                        scores,labels,boxes,time_taken = self.detector(self.track_id,frame_num)
-                        self.time_metrics["detect"] += time_taken
+                    # move detections to CPU
+                    start = time.time()
+                    scores = scores.cpu()
+                    labels = labels.cpu()
+                    boxes = boxes.cpu()
+                    self.time_metrics['load'] += time.time() - start
+                    
+                    # except: # use mock detector
+                    #     scores,labels,boxes,time_taken = self.detector(self.track_id,frame_num)
+                    #     self.time_metrics["detect"] += time_taken
                         
                    
         

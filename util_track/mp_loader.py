@@ -111,7 +111,7 @@ class FrameLoader():
             
             args=(self.queue,sequence,device,buffer_size,)
             kwargs = {"checksum_path":timestamp_checksum_path,"geom_path":timestamp_geom_path,"com_queue":com_queue,"s":s,"d":d}
-            self.worker = ctx.Process(target=load_to_queue_video,args = args, kwargs=kwargs)
+            self.worker = ctx.Process(target=load_to_queue_video,args = args, kwargs=kwargs,daemon = True)
             self.worker.start()
             time.sleep(buffer_size)
         
