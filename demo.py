@@ -48,8 +48,8 @@ if __name__ == "__main__":
      ber = 2.4               # amount by which to expand a priori tracklet to crop object
      init_frames = 1         # number of detection steps in a row to perform
      matching_cutoff = 100   # detections farther from tracklets than this will not be matched 
-     SHOW = True             # show tracking in progress?
-     LOCALIZE = True        # if False, will skip frames between detection steps
+     SHOW = False             # show tracking in progress?
+     LOCALIZE = False       # if False, will skip frames between detection steps
      OUTVID = os.path.join(os.getcwd(),"demo","example_outputs")
     
     ###########################################################################
@@ -82,7 +82,7 @@ if __name__ == "__main__":
      # for timestamps, remove later
      geom = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_geometry_4K.pkl"
      checksum = "/home/worklab/Documents/derek/I24-video-processing/I24-video-ingest/resources/timestamp_pixel_checksum_6.pkl"
-     
+     tf = "/home/worklab/Documents/derek/I24-video-processing/config/camera_calibration_points_I24_validation_system.csv"
      if not LOCALIZE:
          localizer = None
 
@@ -118,7 +118,8 @@ if __name__ == "__main__":
                                        OUT = OUTVID,
                                        wer = 1.25,
                                        checksum_path = checksum,
-                                       geom_path = geom)
+                                       geom_path = geom,
+                                       transform_path = tf)
         
         tracker.track()
         preds, Hz, time_metrics = tracker.get_results()

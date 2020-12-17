@@ -876,15 +876,18 @@ class Localization_Tracker():
                     self.plot(original_im,frame,detections,post_locations,self.all_classes,self.class_dict,frame = frame_num)
                 self.time_metrics['plot'] += time.time() - start
            
-                # load next frame  
-                self.frames_processed += 1
-                start = time.time()
+
             
             except Exception as e:
                     if self.com_queue is not None:
                         self.log_error(e,custom_message = "Postprocess/plotting error")
             
             try:
+                
+                # load next frame  
+                self.frames_processed += 1
+                start = time.time()
+                
                 frame_stuff = next(self.loader)  
                 #print(frame_stuff[0],type(frame_stuff[1]),frame_stuff[4])
 
