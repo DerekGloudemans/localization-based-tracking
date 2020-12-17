@@ -1152,7 +1152,15 @@ class Localization_Tracker():
 
 
     def parse_transform_file(self):
-        camera_id = self.input_file_name.split("/")[-1].split("_")[1]
+        chunks = self.input_file_name.split("/")[-1].split("_")
+        camera_id = None
+        for chunk in chunks:
+            if "p" in chunk.lower() and "c" in chunk.lower():        
+                camera_id = chunk
+                break
+        
+        if camera_id is None:
+            raise Exception("No camera id was extracted from file name {}".format(self.input_file_name))
         
         gps_points = []
         camera_points = []
