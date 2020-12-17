@@ -255,7 +255,7 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
     if com_queue is not None:
         ts = time.time()
         key = "INFO"
-        message = "Loader {} worker (PID {}) initialized successfully.".format(worker_id,os.getpid())
+        message = "Loader {} worker (PID {}) initialized successfully on sequence {}.".format(worker_id,os.getpid(),sequence)
         com_queue.put((ts,key,message,worker_id))
     
     time_metrics = {"decode":1e-04,
@@ -285,9 +285,9 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
             
                 # load next image from videocapture object
                 start = time.time()
-                ret = cap.grab()
+                ret_grab = cap.grab()
                 
-                if ret and (frame_idx %d == 0 or (frame_idx % d)%s == 0): # only decode the frame if we have to
+                if  ret_grab and (frame_idx %d == 0 or (frame_idx % d)%s == 0): # only decode the frame if we have to
                     ret, original_im = cap.retrieve()
                 
                     time_metrics["decode"] += time.time() - start
@@ -299,7 +299,7 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
                         if com_queue is not None:
                             ts = time.time()
                             key = "DEBUG"
-                            message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
+                            message = "Loader {} worker (PID {}) sent last frame ({} total sent) for sequence.".format(worker_id,os.getpid(),frame_idx)
                             com_queue.put((ts,key,message,worker_id))
                             
                         break
@@ -342,14 +342,14 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
                 else: # otherwise, pass a dummy value if the frame won't be used anyway
                     time_metrics["decode"] += time.time() - start
                     
-                    if ret == False:
+                    if ret_grab == False:
                         frame = (-1,None,None,None,None)
                         image_queue.put(frame)
                         
                         if com_queue is not None:
                             ts = time.time()
                             key = "DEBUG"
-                            message = "Loader {} worker (PID {}) sent last frame for sequence.".format(worker_id,os.getpid())
+                            message = "Loader {} worker (PID {}) sent last frame (skipped, {} total sent) for sequence.".format(worker_id,os.getpid(),frame_idx)
                             com_queue.put((ts,key,message,worker_id))
                             
                         break
@@ -382,7 +382,7 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
     
 def test_frameloader(path,geom,checksum):
     
-    test = FrameLoader(path,torch.device("cuda:3"),buffer_size = 15,timestamp_geom_path = geom,timestamp_checksum_path = checksum)
+    test = FrameLoader(path,torch.device("cuda:3"),buffer_size = 15,timestamp_geom_path = geom,timestamp_checksum_path = checksum,d =1,s=1)
     
     print (test.queue.qsize())
     all_time = 0
