@@ -319,9 +319,8 @@ def load_to_queue_video(image_queue,sequence,device,queue_size,s=1,d=1,checksum_
                         im = F.to_tensor(original_im)
                         time_metrics["tensor"] += time.time() - start
     
-                        # temp, only runs on server
-                        if worker_id <2 and frame_idx <2:
-                            cv2.imwrite("/isis/code/I24-video-processing/snapshots/{}_{}.png".format(worker_id,frame_idx),original_im)
+                        #if worker_id <2 and frame_idx <2:
+                            #cv2.imwrite("/isis/code/I24-video-processing/snapshots/{}_{}.png".format(worker_id,frame_idx),original_im)
                             #cv2.imwrite("/home/worklab/Documents/derek/I24-video-processing/snapshots/{}_{}.png".format(worker_id,frame_idx),original_im)
 
                         start = time.time()
