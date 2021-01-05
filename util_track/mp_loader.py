@@ -170,6 +170,14 @@ class FrameLoader():
             
             self.worker.terminate()
             self.worker.join()
+            
+            if self.com_queue is not None:
+                worker_id = int(str(self.device).split(":")[1])
+                ts = time.time()
+                key = "INFO"
+                message = "Loader {} main (PID {}) successfully terminated worker.".format(worker_id,os.getpid()) 
+                self.com_queue.put((ts,key,message,worker_id))
+            
             return frame
 
 def load_to_queue(image_queue,files,device,queue_size):
