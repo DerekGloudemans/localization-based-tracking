@@ -196,7 +196,7 @@ class Localization_Tracker():
         
         ts = time.time()
         key = "DEBUG"
-        message = "Worker {} (PID {}) tracker: Cur frame: {}, Loader queue len: {} Time on this sequence so far: {}, Framerate so far: {} Unique objects: {} Last timestamp: {} ".format(
+        message = "Worker {} (PID {}) tracker: Cur frame: {}, load queue len: {} Time on this sequence so far: {}, Framerate so far: {} Unique objects: {} Last timestamp: {} ".format(
             self.device_id,pid,self.frames_processed+1,qlen,track_time,track_speed,num_objs,last_timestamp)
         self.com_queue.put((ts,key,message,self.device_id))
     
@@ -911,7 +911,7 @@ class Localization_Tracker():
             
             except Exception as e:
                 if self.com_queue is not None:
-                    self.log_error(e,custom_message = "Loader error:")
+                    self.log_error(e,custom_message = "Load error:")
                 
                 
         # clean up at the end
