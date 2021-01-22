@@ -136,7 +136,7 @@ class Localization_Tracker():
             self.writer = None
         
         time.sleep(5)
-        self.n_frames = 10000 # expected number of frames, can be changed
+        self.n_frames = 20000 # expected number of frames, can be changed
         self.frames_processed = 0
     
         self.next_obj_id = 0             # next id for a new object (incremented during tracking)
@@ -532,10 +532,10 @@ class Localization_Tracker():
                 color = (0.7,0.7,0.4) #colors[int(obj.cls)]
                 c1 =  (int(bbox[0]),int(bbox[1]))
                 c2 =  (int(bbox[2]),int(bbox[3]))
-                cv2.rectangle(im,c1,c2,color,1)
+                cv2.rectangle(im,c1,c2,color,2)
                 
                 # plot label
-                text_size = 0.8
+                text_size = 1.3
                 t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN,text_size , 1)[0]
                 c2 = c1[0] + t_size[0] + 3, c1[1] + t_size[1] + 4
                 cv2.rectangle(im, c1, c2,color, -1)
@@ -853,7 +853,7 @@ class Localization_Tracker():
             try:        
                 # remove overlapping objects and anomalies
                 self.remove_overlaps()
-                self.remove_anomalies()
+                self.remove_anomalies(max_scale = 1200)
                     
                     
                 # get all object locations and store in output dict
