@@ -169,6 +169,8 @@ class Localization_Tracker():
             self.com_queue = com_queue
             self.com_rate = com_rate
             self.last_com = 0
+            self.com_queue.put((time.time(),"DEBUG","Worker {} (PID {}) initialized successfully.".format(self.device_id,os.getpid()),self.device_id))
+            
         else:
             self.com_queue = None
             
@@ -692,18 +694,22 @@ class Localization_Tracker():
         """    
         self.start_time = time.time()
         
-        
-        frame_stuff = next(self.loader)     
-        if len(frame_stuff) == 5:
-            (frame_num,frame,dim,original_im,timestamp) = frame_stuff
-            if timestamp is not None:
-                self.all_timestamps.append(timestamp[0])
+        try:
+            frame_stuff = next(self.loader)     
+            if len(frame_stuff) == 5:
+                (frame_num,frame,dim,original_im,timestamp) = frame_stuff
+                if timestamp is not None:
+                    self.all_timestamps.append(timestamp[0])
+                else:
+                    self.all_timestamps.append(None)
             else:
-                self.all_timestamps.append(None)
-        else:
-            (frame_num,frame,dim,original_im) = frame_stuff
-            self.all_timestamps.append(-1)
+                (frame_num,frame,dim,original_im) = frame_stuff
+                self.all_timestamps.append(-1)
             
+        except Exception as e:
+                if self.com_queue is not None:
+                    self.log_error(e,custom_message = "Error recieving first frame.")
+        
         while frame_num != -1:            
             
             try:
